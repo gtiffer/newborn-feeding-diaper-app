@@ -410,8 +410,13 @@ class BabyTracker {
             this.togglePumpingAmountFields('both');
         }
         
-        // Scroll to form
-        document.getElementById(formId).scrollIntoView({ behavior: 'smooth' });
+        // Scroll to form with a small delay to ensure it's visible
+        setTimeout(() => {
+            document.getElementById(formId).scrollIntoView({ 
+                behavior: 'smooth',
+                block: 'start'
+            });
+        }, 100);
     }
 
     hideForm(formId) {
@@ -488,6 +493,7 @@ class BabyTracker {
         const entry = {
             type: 'feeding',
             datetime: datetime,
+            timestamp: new Date(datetime).getTime(),
             feedingType: feedingType
         };
 
@@ -531,7 +537,6 @@ class BabyTracker {
         }
 
         this.hideForm('feedingForm');
-        this.updateBreastStats();
         e.target.reset();
     }
 
@@ -549,6 +554,7 @@ class BabyTracker {
         const entry = {
             type: 'pumping',
             datetime: datetime,
+            timestamp: new Date(datetime).getTime(),
             pumpingBreast: pumpingBreast
         };
 
@@ -586,7 +592,6 @@ class BabyTracker {
         }
 
         this.hideForm('pumpingForm');
-        this.updateBreastStats();
         e.target.reset();
     }
 
@@ -610,6 +615,7 @@ class BabyTracker {
         const entry = {
             type: 'diaper',
             datetime: datetime,
+            timestamp: new Date(datetime).getTime(),
             diaperType: diaperType
         };
 
