@@ -147,6 +147,7 @@ class BabyTracker {
         // Load entries from database
         this.entries = await this.loadEntries();
         this.updateQuickStats();
+        this.updateBreastStats();
         this.displayRecentEntries();
     }
 
@@ -530,6 +531,61 @@ class BabyTracker {
         }
 
         this.hideForm('feedingForm');
+        this.updateBreastStats();
+        e.target.reset();
+    }
+
+    async handlePumpingSubmit(e) {
+        e.preventDefault();
+        
+        const pumpingBreast = document.querySelector('input[name="pumpingBreast"]:checked').value;
+        const datetime = document.getElementById('pumpingTime').value;
+        
+        if (!datetime) {
+            alert('Please select a time');
+            return;
+        }
+        
+        const entry = {
+            type: 'pumping',
+            datetime: datetime,
+            pumpingBreast: pumpingBreast
+        };
+
+        if (pumpingBreast === 'both') {
+            entry.leftAmount = parseFloat(document.getElementById('leftAmount').value) || 0;
+            entry.rightAmount = parseFloat(document.getElementById('rightAmount').value) || 0;
+            entry.totalAmount = entry.leftAmount + entry.rightAmount;
+            entry.unit = document.getElementById('splitPumpingUnit').value;
+        } else {
+            entry.totalAmount = parseFloat(document.getElementById('pumpingAmount').value) || 0;
+            entry.unit = document.getElementById('pumpingUnit').value;
+        }
+
+        entry.duration = parseInt(document.getElementById('pumpingDuration').value) || 0;
+
+        // Check if we're editing or creating new
+        if (this.editingEntryId) {
+            // Update existing entry
+            entry.id = this.editingEntryId;
+            entry.timestamp = new Date(entry.datetime).getTime();
+            await this.updateEntry(entry);
+            this.entries = await this.loadEntries();
+            this.updateQuickStats();
+            this.updateBreastStats();
+            this.displayRecentEntries();
+            // Update history if it's open
+            if (!document.getElementById('historyModal').classList.contains('hidden')) {
+                const activeFilter = document.querySelector('.filter-btn.active').dataset.filter;
+                this.filterHistory(activeFilter);
+            }
+            this.editingEntryId = null; // Clear editing flag
+        } else {
+            // Create new entry
+            await this.addEntry(entry);
+        }
+
+        this.hideForm('pumpingForm');
         this.updateBreastStats();
         e.target.reset();
     }
