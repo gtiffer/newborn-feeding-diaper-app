@@ -193,16 +193,15 @@ class BabyTracker {
             // Extract the entry data (everything except id, type, datetime, timestamp)
             const { id, type, datetime, timestamp, ...entryData } = entry;
 
-            // Store datetime in ISO format but preserve the local time intent
-            const localDate = new Date(datetime);
-            const isoString = localDate.toISOString();
+            // Store datetime as local wall time (YYYY-MM-DDTHH:MM)
+            const storedDatetime = this.formatForDateTimeLocal(datetime);
             
             const { data, error } = await supabaseClient
                 .from('entries')
                 .insert({
                     user_id: user.id,
                     type: type,
-                    datetime: isoString,
+                    datetime: storedDatetime,
                     data: entryData
                 })
                 .select()
@@ -224,15 +223,14 @@ class BabyTracker {
 
             const { id, type, datetime, timestamp, ...entryData } = entry;
 
-            // Store datetime in ISO format but preserve the local time intent
-            const localDate = new Date(datetime);
-            const isoString = localDate.toISOString();
+            // Store datetime as local wall time (YYYY-MM-DDTHH:MM)
+            const storedDatetime = this.formatForDateTimeLocal(datetime);
             
             const { error } = await supabaseClient
                 .from('entries')
                 .update({
                     type: type,
-                    datetime: isoString,
+                    datetime: storedDatetime,
                     data: entryData
                 })
                 .eq('id', id)
@@ -325,6 +323,25 @@ class BabyTracker {
             hour12: true,
             timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
         });
+    }
+
+    // Normalize any datetime-like input to the format required by input[type="datetime-local"]: YYYY-MM-DDTHH:MM
+    formatForDateTimeLocal(datetimeLike) {
+        if (!datetimeLike) return '';
+        // If already in the expected format (length 16 and contains 'T'), return as-is
+        if (typeof datetimeLike === 'string' && datetimeLike.length >= 16 && datetimeLike.includes('T')) {
+            return datetimeLike.slice(0, 16);
+        }
+
+        const date = new Date(datetimeLike);
+        if (isNaN(date.getTime())) return '';
+
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        return `${year}-${month}-${day}T${hours}:${minutes}`;
     }
 
     setupEventListeners() {
@@ -470,6 +487,36 @@ class BabyTracker {
             colorField.classList.remove('hidden');
         } else {
             colorField.classList.add('hidden');
+        }
+    }
+
+    toggleNursingDurationFields(selectedBreast) {
+        const singleField = document.getElementById('singleDurationField');
+        const splitFields = document.getElementById('splitDurationFields');
+
+        if (!singleField || !splitFields) return;
+
+        if (selectedBreast === 'both') {
+            singleField.classList.add('hidden');
+            splitFields.classList.remove('hidden');
+        } else {
+            splitFields.classList.add('hidden');
+            singleField.classList.remove('hidden');
+        }
+    }
+
+    togglePumpingAmountFields(selectedBreast) {
+        const singleField = document.getElementById('singleAmountField');
+        const splitFields = document.getElementById('splitAmountFields');
+
+        if (!singleField || !splitFields) return;
+
+        if (selectedBreast === 'both') {
+            singleField.classList.add('hidden');
+            splitFields.classList.remove('hidden');
+        } else {
+            splitFields.classList.add('hidden');
+            singleField.classList.remove('hidden');
         }
     }
 
@@ -677,6 +724,105 @@ class BabyTracker {
         
         document.getElementById('todayFeedings').textContent = todayFeedings;
         document.getElementById('todayDiapers').textContent = todayDiapers;
+    }
+
+    updateBreastStats() {
+        // Aggregate today's nursing minutes and pumped amounts per breast
+        const todayEntries = this.getTodayEntries();
+
+        let leftNursingMins = 0;
+        let rightNursingMins = 0;
+        let leftPumpedMl = 0;
+        let rightPumpedMl = 0;
+
+        let lastUsedLeftTs = null;
+        let lastUsedRightTs = null;
+
+        // Helper to convert oz to ml
+        const toMl = (amount, unit) => {
+            if (!amount) return 0;
+            if (unit === 'oz') return amount * 29.5735;
+            return amount; // assume ml
+        };
+
+        for (const entry of todayEntries) {
+            if (entry.type === 'feeding') {
+                // Nursing contributions
+                if (entry.feedingType === 'nursing' || entry.feedingType === 'both') {
+                    if (entry.nursingBreast === 'both') {
+                        leftNursingMins += Number(entry.leftDuration || 0);
+                        rightNursingMins += Number(entry.rightDuration || 0);
+                        // both breasts used at this time
+                        const ts = Number(entry.timestamp);
+                        if (!isNaN(ts)) {
+                            lastUsedLeftTs = Math.max(lastUsedLeftTs ?? 0, ts);
+                            lastUsedRightTs = Math.max(lastUsedRightTs ?? 0, ts);
+                        }
+                    } else if (entry.nursingBreast === 'left') {
+                        leftNursingMins += Number(entry.totalDuration || 0);
+                        const ts = Number(entry.timestamp);
+                        if (!isNaN(ts)) lastUsedLeftTs = Math.max(lastUsedLeftTs ?? 0, ts);
+                    } else if (entry.nursingBreast === 'right') {
+                        rightNursingMins += Number(entry.totalDuration || 0);
+                        const ts = Number(entry.timestamp);
+                        if (!isNaN(ts)) lastUsedRightTs = Math.max(lastUsedRightTs ?? 0, ts);
+                    }
+                }
+            } else if (entry.type === 'pumping') {
+                // Pumping contributions
+                if (entry.pumpingBreast === 'both') {
+                    leftPumpedMl += toMl(Number(entry.leftAmount || 0), entry.unit);
+                    rightPumpedMl += toMl(Number(entry.rightAmount || 0), entry.unit);
+                    const ts = Number(entry.timestamp);
+                    if (!isNaN(ts)) {
+                        lastUsedLeftTs = Math.max(lastUsedLeftTs ?? 0, ts);
+                        lastUsedRightTs = Math.max(lastUsedRightTs ?? 0, ts);
+                    }
+                } else if (entry.pumpingBreast === 'left') {
+                    leftPumpedMl += toMl(Number(entry.totalAmount || 0), entry.unit);
+                    const ts = Number(entry.timestamp);
+                    if (!isNaN(ts)) lastUsedLeftTs = Math.max(lastUsedLeftTs ?? 0, ts);
+                } else if (entry.pumpingBreast === 'right') {
+                    rightPumpedMl += toMl(Number(entry.totalAmount || 0), entry.unit);
+                    const ts = Number(entry.timestamp);
+                    if (!isNaN(ts)) lastUsedRightTs = Math.max(lastUsedRightTs ?? 0, ts);
+                }
+            }
+        }
+
+        // Update UI
+        const leftNursingEl = document.getElementById('leftNursingTime');
+        const rightNursingEl = document.getElementById('rightNursingTime');
+        const leftPumpedEl = document.getElementById('leftPumpedAmount');
+        const rightPumpedEl = document.getElementById('rightPumpedAmount');
+        const leftLastUsedEl = document.getElementById('leftLastUsed');
+        const rightLastUsedEl = document.getElementById('rightLastUsed');
+        const recommendationEl = document.getElementById('breastRecommendation');
+
+        if (leftNursingEl) leftNursingEl.textContent = `${Math.round(leftNursingMins)} min`;
+        if (rightNursingEl) rightNursingEl.textContent = `${Math.round(rightNursingMins)} min`;
+
+        if (leftPumpedEl) leftPumpedEl.textContent = `${Math.round(leftPumpedMl)} ml`;
+        if (rightPumpedEl) rightPumpedEl.textContent = `${Math.round(rightPumpedMl)} ml`;
+
+        if (leftLastUsedEl) leftLastUsedEl.textContent = lastUsedLeftTs ? this.formatTime(lastUsedLeftTs) : '--';
+        if (rightLastUsedEl) rightLastUsedEl.textContent = lastUsedRightTs ? this.formatTime(lastUsedRightTs) : '--';
+
+        if (recommendationEl) {
+            let recommendation = 'Either breast';
+            if (lastUsedLeftTs && lastUsedRightTs) {
+                if (lastUsedLeftTs > lastUsedRightTs) recommendation = 'Start with: Right breast';
+                else if (lastUsedRightTs > lastUsedLeftTs) recommendation = 'Start with: Left breast';
+                else recommendation = 'Start with: Either breast';
+            } else if (lastUsedLeftTs && !lastUsedRightTs) {
+                recommendation = 'Start with: Right breast';
+            } else if (!lastUsedLeftTs && lastUsedRightTs) {
+                recommendation = 'Start with: Left breast';
+            } else {
+                recommendation = 'Start with: Either breast';
+            }
+            recommendationEl.textContent = recommendation;
+        }
     }
 
     displayRecentEntries() {
@@ -1029,7 +1175,7 @@ class BabyTracker {
             this.showForm('feedingForm');
             
             // Pre-fill form values
-            document.getElementById('feedingTime').value = entry.datetime;
+            document.getElementById('feedingTime').value = this.formatForDateTimeLocal(entry.datetime);
             
             // Handle new feeding types
             if (entry.feedingType === 'nursing' || entry.feedingType === 'bottle' || entry.feedingType === 'both') {
@@ -1072,7 +1218,7 @@ class BabyTracker {
             this.showForm('pumpingForm');
             
             // Pre-fill form values
-            document.getElementById('pumpingTime').value = entry.datetime;
+            document.getElementById('pumpingTime').value = this.formatForDateTimeLocal(entry.datetime);
             document.querySelector(`input[name="pumpingBreast"][value="${entry.pumpingBreast}"]`).checked = true;
             
             this.togglePumpingAmountFields(entry.pumpingBreast);
@@ -1093,7 +1239,7 @@ class BabyTracker {
             this.showForm('diaperForm');
             
             // Pre-fill form values
-            document.getElementById('diaperTime').value = entry.datetime;
+            document.getElementById('diaperTime').value = this.formatForDateTimeLocal(entry.datetime);
             document.querySelector(`input[name="diaperType"][value="${entry.diaperType}"]`).checked = true;
             
             // Trigger the toggle to show color field if needed
@@ -1128,9 +1274,6 @@ class BabyTracker {
         }
     }
 
-    showReference() {
-        document.getElementById('referenceModal').classList.remove('hidden');
-    }
 }
 
 // Global functions for inline event handlers
