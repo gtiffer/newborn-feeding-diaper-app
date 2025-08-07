@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Little Logger - Baby Tracker</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <script>
+        // Register service worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./sw.js').catch(err => {
+                console.log('Service worker registration failed:', err);
+            });
+        }
+    </script>
+    <div id="app">
+        <header>
+            <h1>Little Logger</h1>
+            <div class="header-buttons">
+                <button id="referenceBtn" class="icon-btn" title="Guidelines">📊</button>
+                <button id="toggleTheme" class="theme-toggle">🌙</button>
+                <button id="signOutBtn" class="icon-btn" title="Sign Out">↪️</button>
+            </div>
+        </header>
+
+        <!-- Auth Screen (initially shown) -->
+        <div id="authScreen" class="auth-screen">
+            <div class="auth-container">
+                <h2>Welcome to Little Logger</h2>
+                <p>Sign in to track your baby's feeding and diaper changes</p>
+                
+                <form id="authForm">
+                    <input type="email" id="authEmail" placeholder="Email" required>
+                    <input type="password" id="authPassword" placeholder="Password" required>
+                    <button type="submit" id="authSubmitBtn">Sign In</button>
+                </form>
+                
+                <p class="auth-toggle">
+                    Don't have an account? 
+                    <button type="button" id="toggleAuthMode">Sign Up</button>
+                </p>
+            </div>
+        </div>
+
+        <main id="appMain" class="hidden">
+            <!-- Quick Stats -->
+            <section id="quickStats" class="quick-stats">
+                <div class="stat-card">
+                    <h3>Last Feeding</h3>
+                    <p id="lastFeeding">--</p>
+                </div>
+                <div class="stat-card">
+                    <h3>Last Diaper</h3>
+                    <p id="lastDiaper">--</p>
+                </div>
+                <div class="stat-card clickable" id="todayFeedingsCard">
+                    <h3>Today's Feedings</h3>
+                    <p id="todayFeedings">0</p>
+                </div>
+                <div class="stat-card clickable" id="todayDiapersCard">
+                    <h3>Today's Diapers</h3>
+                    <p id="todayDiapers">0</p>
+                </div>
+            </section>
+
+            <!-- Breast Statistics -->
+            <section id="breastStats" class="breast-stats">
+                <h3>Today's Breast Activity</h3>
+                <div class="breast-stats-container">
+                    <div class="breast-stat left-breast">
+                        <h4>Left Breast</h4>
+                        <div class="breast-details">
+                            <span class="stat-item">Nursed: <span id="leftNursingTime">0 min</span></span>
+                            <span class="stat-item">Pumped: <span id="leftPumpedAmount">0 ml</span></span>
+                            <span class="stat-item last-used">Last: <span id="leftLastUsed">--</span></span>
+                        </div>
+                    </div>
+                    <div class="breast-stat right-breast">
+                        <h4>Right Breast</h4>
+                        <div class="breast-details">
+                            <span class="stat-item">Nursed: <span id="rightNursingTime">0 min</span></span>
+                            <span class="stat-item">Pumped: <span id="rightPumpedAmount">0 ml</span></span>
+                            <span class="stat-item last-used">Last: <span id="rightLastUsed">--</span></span>
+                        </div>
+                    </div>
+                </div>
+                <div class="breast-recommendation">
+                    <span id="breastRecommendation">Start with: Either breast</span>
+                </div>
+            </section>
+
+            <!-- Quick Entry Buttons -->
+            <section class="quick-actions">
+                <button id="feedingBtn" class="action-btn feeding">
+                    🍼 Log Feeding
+                </button>
+                <button id="pumpingBtn" class="action-btn pumping">
+                    🤱 Log Pumping
+                </button>
+                <button id="diaperBtn" class="action-btn diaper">
+                    👶 Log Diaper
+                </button>
+            </section>
+
+            <!-- Entry Forms (Hidden by default) -->
+            <section id="feedingForm" class="entry-form hidden">
+                <h2>Log Feeding</h2>
+                <form id="feedingFormElement">
+                    <div class="form-group">
+                        <label for="feedingTime">Time</label>
+                        <input type="datetime-local" id="feedingTime" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Type</label>
+                        <div class="radio-group">
+                            <label>
+                                <input type="radio" name="feedingType" value="nursing" checked>
+                                Nursing
+                            </label>
+                            <label>
+                                <input type="radio" name="feedingType" value="bottle">
+                                Bottle
+                            </label>
+                            <label>
+                                <input type="radio" name="feedingType" value="both">
+                                Both
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Nursing-specific fields -->
+                    <div id="nursingFields">
+                        <div class="form-group">
+                            <label>Which Breast?</label>
+                            <div class="radio-group">
+                                <label>
+                                    <input type="radio" name="nursingBreast" value="left">
+                                    Left
+                                </label>
+                                <label>
+                                    <input type="radio" name="nursingBreast" value="right">
+                                    Right
+                                </label>
+                                <label>
+                                    <input type="radio" name="nursingBreast" value="both" checked>
+                                    Both
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <div id="singleDurationField">
+                                <label for="nursingDuration">Duration (minutes)</label>
+                                <input type="number" id="nursingDuration" min="1" max="120">
+                            </div>
+                            <div id="splitDurationFields" class="hidden">
+                                <label>Duration per breast (minutes)</label>
+                                <div class="split-inputs">
+                                    <input type="number" id="leftDuration" placeholder="Left" min="1" max="120">
+                                    <input type="number" id="rightDuration" placeholder="Right" min="1" max="120">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Bottle-specific fields -->
+                    <div id="bottleFields" class="hidden">
+                        <div class="form-group">
+                            <label for="bottleAmount">Amount</label>
+                            <div class="amount-input">
+                                <input type="number" id="bottleAmount" step="0.5" min="0.5">
+                                <select id="bottleUnit">
+                                    <option value="ml">ml</option>
+                                    <option value="oz">oz</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="save-btn">Save</button>
+                        <button type="button" class="cancel-btn" onclick="tracker.hideForm('feedingForm')">Cancel</button>
+                    </div>
+                </form>
+            </section>
+
+            <!-- Pumping Form -->
+            <section id="pumpingForm" class="entry-form hidden">
+                <h2>Log Pumping Session</h2>
+                <form id="pumpingFormElement">
+                    <div class="form-group">
+                        <label for="pumpingTime">Time</label>
+                        <input type="datetime-local" id="pumpingTime" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Which Breast?</label>
+                        <div class="radio-group">
+                            <label>
+                                <input type="radio" name="pumpingBreast" value="left">
+                                Left
+                            </label>
+                            <label>
+                                <input type="radio" name="pumpingBreast" value="right">
+                                Right
+                            </label>
+                            <label>
+                                <input type="radio" name="pumpingBreast" value="both" checked>
+                                Both
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="form-group" id="pumpingAmountFields">
+                        <div id="singleAmountField">
+                            <label for="pumpingAmount">Amount</label>
+                            <div class="amount-input">
+                                <input type="number" id="pumpingAmount" step="5" min="5">
+                                <select id="pumpingUnit">
+                                    <option value="ml">ml</option>
+                                    <option value="oz">oz</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="splitAmountFields" class="hidden">
+                            <label>Amount per breast</label>
+                            <div class="split-inputs">
+                                <input type="number" id="leftAmount" placeholder="Left" step="5" min="0">
+                                <input type="number" id="rightAmount" placeholder="Right" step="5" min="0">
+                                <select id="splitPumpingUnit">
+                                    <option value="ml">ml</option>
+                                    <option value="oz">oz</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="pumpingDuration">Duration (minutes)</label>
+                        <input type="number" id="pumpingDuration" min="1" max="120">
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="save-btn">Save</button>
+                        <button type="button" class="cancel-btn" onclick="tracker.hideForm('pumpingForm')">Cancel</button>
+                    </div>
+                </form>
+            </section>
+
+            <section id="diaperForm" class="entry-form hidden">
+                <h2>Log Diaper</h2>
+                <form id="diaperFormElement">
+                    <div class="form-group">
+                        <label for="diaperTime">Time</label>
+                        <input type="datetime-local" id="diaperTime" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Type</label>
+                        <div class="radio-group">
+                            <label>
+                                <input type="radio" name="diaperType" value="wet" checked>
+                                Wet
+                            </label>
+                            <label>
+                                <input type="radio" name="diaperType" value="poop">
+                                Poop
+                            </label>
+                            <label>
+                                <input type="radio" name="diaperType" value="both">
+                                Both
+                            </label>
+                        </div>
+                    </div>
+
+                    <div id="poopColorField" class="form-group hidden">
+                        <label>Poop Color</label>
+                        <select id="poopColor">
+                            <option value="">Select color</option>
+                            <option value="yellow">Yellow (normal breastfed)</option>
+                            <option value="brown">Brown/Tan (normal formula)</option>
+                            <option value="green">Green</option>
+                            <option value="black">Black</option>
+                            <option value="red">Red</option>
+                            <option value="white">White/Gray</option>
+                            <option value="orange">Orange</option>
+                        </select>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="save-btn">Save</button>
+                        <button type="button" class="cancel-btn" onclick="tracker.hideForm('diaperForm')">Cancel</button>
+                    </div>
+                </form>
+            </section>
+
+            <!-- History Section -->
+            <section class="history-section">
+                <div class="history-header">
+                    <h2>Recent Entries</h2>
+                    <button id="viewHistoryBtn" class="view-history-btn">View All History</button>
+                </div>
+                <div id="recentEntries" class="recent-entries"></div>
+            </section>
+
+            <!-- Full History Modal -->
+            <div id="historyModal" class="modal hidden">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2>60-Day History</h2>
+                        <button class="close-btn" onclick="hideHistory()">&times;</button>
+                    </div>
+                    <div class="filter-buttons">
+                        <button class="filter-btn active" data-filter="all">All</button>
+                        <button class="filter-btn" data-filter="feeding">Feedings</button>
+                        <button class="filter-btn" data-filter="pumping">Pumping</button>
+                        <button class="filter-btn" data-filter="diaper">Diapers</button>
+                    </div>
+                    <div id="historyList" class="history-list"></div>
+                </div>
+            </div>
+
+            <!-- Daily Summary Modal -->
+            <div id="dailySummaryModal" class="modal hidden">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2 id="dailySummaryTitle">Today's Summary</h2>
+                        <button class="close-btn" onclick="hideDailySummary()">&times;</button>
+                    </div>
+                    <div id="dailySummaryList" class="history-list"></div>
+                </div>
+            </div>
+
+            <!-- Entry Detail Modal -->
+            <div id="entryDetailModal" class="modal hidden">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2>Entry Details</h2>
+                        <button class="close-btn" onclick="hideEntryDetail()">&times;</button>
+                    </div>
+                    <div id="entryDetailContent" class="entry-detail-content">
+                        <!-- Content will be dynamically inserted -->
+                    </div>
+                    <div class="entry-actions">
+                        <button id="editEntryBtn" class="edit-btn">✏️ Edit Entry</button>
+                        <button id="deleteEntryBtn" class="delete-btn">🗑️ Delete Entry</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Reference Modal -->
+            <div id="referenceModal" class="modal hidden">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2>Feeding & Diaper Guidelines</h2>
+                        <button class="close-btn" onclick="hideReference()">&times;</button>
+                    </div>
+                    <div class="reference-content">
+                        <h3>Feeding Guidelines</h3>
+                        <table class="reference-table">
+                            <thead>
+                                <tr>
+                                    <th>Age</th>
+                                    <th>Frequency</th>
+                                    <th>Amount per Feed</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>0-2 Weeks</td>
+                                    <td>Every 1-3 hours<br><small>(8-12 times/day)</small></td>
+                                    <td>1-2 oz<br><small>(30-60 mL)</small></td>
+                                </tr>
+                                <tr>
+                                    <td>3-4 Weeks</td>
+                                    <td>Every 2-3 hours<br><small>(8-10 times/day)</small></td>
+                                    <td>2-3 oz<br><small>(60-90 mL)</small></td>
+                                </tr>
+                                <tr>
+                                    <td>1-2 Months</td>
+                                    <td>Every 2-4 hours<br><small>(7-8 times/day)</small></td>
+                                    <td>3-4 oz<br><small>(90-120 mL)</small></td>
+                                </tr>
+                                <tr>
+                                    <td>3-4 Months</td>
+                                    <td>Every 3-4 hours<br><small>(6-7 times/day)</small></td>
+                                    <td>4-6 oz<br><small>(120-180 mL)</small></td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <h3>Diaper Guidelines</h3>
+                        <table class="reference-table">
+                            <thead>
+                                <tr>
+                                    <th>Age</th>
+                                    <th>Wet Diapers</th>
+                                    <th>Dirty Diapers</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Day 1-2</td>
+                                    <td>1-2 per day</td>
+                                    <td>1-2 per day<br><small>(black/dark)</small></td>
+                                </tr>
+                                <tr>
+                                    <td>Day 3-4</td>
+                                    <td>3-4 per day</td>
+                                    <td>3-4 per day<br><small>(transitional)</small></td>
+                                </tr>
+                                <tr>
+                                    <td>Day 5+</td>
+                                    <td>6+ per day</td>
+                                    <td>3-4+ per day<br><small>(yellow/seedy if BF)</small></td>
+                                </tr>
+                                <tr>
+                                    <td>6+ Weeks</td>
+                                    <td>6+ per day</td>
+                                    <td>Varies widely<br><small>(1-10 per day)</small></td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <div class="reference-note">
+                            <p><strong>Note:</strong> These are general guidelines. Every baby is different. Consult your pediatrician if you have concerns about feeding or diaper patterns.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
