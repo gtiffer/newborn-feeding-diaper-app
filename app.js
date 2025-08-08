@@ -167,10 +167,9 @@ class BabyTracker {
 
             // Transform data from Supabase format to app format
             return data.map(entry => {
-                // Ensure datetime is in correct format for display
+                // Normalize: entries.datetime may be ISO (UTC) or local string
                 const datetime = entry.datetime;
                 const timestamp = new Date(datetime).getTime();
-                
                 return {
                     id: entry.id,
                     type: entry.type,
@@ -193,8 +192,8 @@ class BabyTracker {
             // Extract the entry data (everything except id, type, datetime, timestamp)
             const { id, type, datetime, timestamp, ...entryData } = entry;
 
-            // Store datetime as local wall time (YYYY-MM-DDTHH:MM)
-            const storedDatetime = this.formatForDateTimeLocal(datetime);
+            // Store as UTC ISO to avoid timezone ambiguity in DB
+            const storedDatetime = this.toUTCISOStringFromLocal(datetime);
             
             const { data, error } = await supabaseClient
                 .from('entries')
@@ -223,8 +222,8 @@ class BabyTracker {
 
             const { id, type, datetime, timestamp, ...entryData } = entry;
 
-            // Store datetime as local wall time (YYYY-MM-DDTHH:MM)
-            const storedDatetime = this.formatForDateTimeLocal(datetime);
+            // Store as UTC ISO to avoid timezone ambiguity in DB
+            const storedDatetime = this.toUTCISOStringFromLocal(datetime);
             
             const { error } = await supabaseClient
                 .from('entries')
@@ -325,23 +324,39 @@ class BabyTracker {
         });
     }
 
-    // Normalize any datetime-like input to the format required by input[type="datetime-local"]: YYYY-MM-DDTHH:MM
+    // Normalize to the format required by input[type="datetime-local"] in LOCAL time: YYYY-MM-DDTHH:MM
     formatForDateTimeLocal(datetimeLike) {
         if (!datetimeLike) return '';
-        // If already in the expected format (length 16 and contains 'T'), return as-is
-        if (typeof datetimeLike === 'string' && datetimeLike.length >= 16 && datetimeLike.includes('T')) {
-            return datetimeLike.slice(0, 16);
-        }
-
-        const date = new Date(datetimeLike);
+        const date = (datetimeLike instanceof Date) ? datetimeLike : new Date(datetimeLike);
         if (isNaN(date.getTime())) return '';
+        // Convert to local wall time by removing tz offset, then slice
+        const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+        return local.toISOString().slice(0, 16);
+    }
 
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        const hours = String(date.getHours()).padStart(2, '0');
-        const minutes = String(date.getMinutes()).padStart(2, '0');
-        return `${year}-${month}-${day}T${hours}:${minutes}`;
+    // Parse a 'YYYY-MM-DDTHH:MM' as local time
+    parseLocalDateTime(localString) {
+        if (!localString || typeof localString !== 'string') return null;
+        const match = localString.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+        if (!match) {
+            const fallback = new Date(localString);
+            return isNaN(fallback.getTime()) ? null : fallback;
+        }
+        const [_, y, m, d, hh, mm] = match;
+        return new Date(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), 0, 0);
+    }
+
+    // Convert local datetime string to a UTC ISO string for storage
+    toUTCISOStringFromLocal(localString) {
+        const localDate = this.parseLocalDateTime(localString);
+        if (!localDate) return '';
+        return localDate.toISOString();
+    }
+
+    // Epoch millis from local datetime string
+    getTimestampFromLocal(localString) {
+        const localDate = this.parseLocalDateTime(localString);
+        return localDate ? localDate.getTime() : 0;
     }
 
     setupEventListeners() {
@@ -540,7 +555,7 @@ class BabyTracker {
         const entry = {
             type: 'feeding',
             datetime: datetime,
-            timestamp: new Date(datetime).getTime(),
+            timestamp: this.getTimestampFromLocal(datetime),
             feedingType: feedingType
         };
 
@@ -566,7 +581,7 @@ class BabyTracker {
         if (this.editingEntryId) {
             // Update existing entry
             entry.id = this.editingEntryId;
-            entry.timestamp = new Date(entry.datetime).getTime();
+            entry.timestamp = this.getTimestampFromLocal(entry.datetime);
             await this.updateEntry(entry);
             this.entries = await this.loadEntries();
             this.updateQuickStats();
@@ -601,7 +616,7 @@ class BabyTracker {
         const entry = {
             type: 'pumping',
             datetime: datetime,
-            timestamp: new Date(datetime).getTime(),
+            timestamp: this.getTimestampFromLocal(datetime),
             pumpingBreast: pumpingBreast
         };
 
@@ -621,7 +636,7 @@ class BabyTracker {
         if (this.editingEntryId) {
             // Update existing entry
             entry.id = this.editingEntryId;
-            entry.timestamp = new Date(entry.datetime).getTime();
+            entry.timestamp = this.getTimestampFromLocal(entry.datetime);
             await this.updateEntry(entry);
             this.entries = await this.loadEntries();
             this.updateQuickStats();
@@ -662,7 +677,7 @@ class BabyTracker {
         const entry = {
             type: 'diaper',
             datetime: datetime,
-            timestamp: new Date(datetime).getTime(),
+            timestamp: this.getTimestampFromLocal(datetime),
             diaperType: diaperType
         };
 
@@ -678,7 +693,7 @@ class BabyTracker {
         if (this.editingEntryId) {
             // Update existing entry
             entry.id = this.editingEntryId;
-            entry.timestamp = new Date(entry.datetime).getTime();
+            entry.timestamp = this.getTimestampFromLocal(entry.datetime);
             await this.updateEntry(entry);
             this.entries = await this.loadEntries();
             this.updateQuickStats();
