@@ -98,12 +98,9 @@ class AuthManager {
                 if (result.error) throw result.error;
                 
                 this.user = result.data.user;
-                console.log('Sign in successful, user:', this.user);
-                alert('Sign in successful! Loading app...');
                 this.showApp();
             }
         } catch (error) {
-            console.error('Auth error:', error);
             alert('Error: ' + error.message);
             submitBtn.textContent = isSignUp ? 'Create Account' : 'Sign In';
             submitBtn.disabled = false;
@@ -146,9 +143,7 @@ class BabyTracker {
         
         // Load entries from database
         this.entries = await this.loadEntries();
-        this.updateQuickStats();
-        this.updateBreastStats();
-        this.displayRecentEntries();
+        this.refreshUI();
     }
 
     async loadEntries() {
@@ -179,7 +174,6 @@ class BabyTracker {
                 };
             });
         } catch (error) {
-            console.error('Error loading entries:', error);
             return [];
         }
     }
@@ -210,7 +204,6 @@ class BabyTracker {
             
             return data;
         } catch (error) {
-            console.error('Error saving entry:', error);
             alert('Unable to save entry: ' + error.message);
         }
     }
@@ -237,7 +230,6 @@ class BabyTracker {
 
             if (error) throw error;
         } catch (error) {
-            console.error('Error updating entry:', error);
             alert('Unable to update entry: ' + error.message);
         }
     }
@@ -255,7 +247,6 @@ class BabyTracker {
 
             if (error) throw error;
         } catch (error) {
-            console.error('Error deleting entry:', error);
             alert('Unable to delete entry: ' + error.message);
         }
     }
@@ -266,12 +257,9 @@ class BabyTracker {
             if (savedEntry) {
                 // Reload entries from database to stay in sync
                 this.entries = await this.loadEntries();
-                this.updateQuickStats();
-                this.updateBreastStats();
-                this.displayRecentEntries();
+                this.refreshUI();
             }
         } catch (error) {
-            console.error('Error adding entry:', error);
         }
     }
 
@@ -577,26 +565,7 @@ class BabyTracker {
             entry.bottleUnit = document.getElementById('bottleUnit').value;
         }
 
-        // Check if we're editing or creating new
-        if (this.editingEntryId) {
-            // Update existing entry
-            entry.id = this.editingEntryId;
-            entry.timestamp = this.getTimestampFromLocal(entry.datetime);
-            await this.updateEntry(entry);
-            this.entries = await this.loadEntries();
-            this.updateQuickStats();
-            this.updateBreastStats();
-            this.displayRecentEntries();
-            // Update history if it's open
-            if (!document.getElementById('historyModal').classList.contains('hidden')) {
-                const activeFilter = document.querySelector('.filter-btn.active').dataset.filter;
-                this.filterHistory(activeFilter);
-            }
-            this.editingEntryId = null; // Clear editing flag
-        } else {
-            // Create new entry
-            await this.addEntry(entry);
-        }
+        await this.saveOrUpdateEntry(entry);
 
         this.hideForm('feedingForm');
         e.target.reset();
@@ -632,26 +601,7 @@ class BabyTracker {
 
         entry.duration = parseInt(document.getElementById('pumpingDuration').value) || 0;
 
-        // Check if we're editing or creating new
-        if (this.editingEntryId) {
-            // Update existing entry
-            entry.id = this.editingEntryId;
-            entry.timestamp = this.getTimestampFromLocal(entry.datetime);
-            await this.updateEntry(entry);
-            this.entries = await this.loadEntries();
-            this.updateQuickStats();
-            this.updateBreastStats();
-            this.displayRecentEntries();
-            // Update history if it's open
-            if (!document.getElementById('historyModal').classList.contains('hidden')) {
-                const activeFilter = document.querySelector('.filter-btn.active').dataset.filter;
-                this.filterHistory(activeFilter);
-            }
-            this.editingEntryId = null; // Clear editing flag
-        } else {
-            // Create new entry
-            await this.addEntry(entry);
-        }
+        await this.saveOrUpdateEntry(entry);
 
         this.hideForm('pumpingForm');
         e.target.reset();
@@ -689,25 +639,7 @@ class BabyTracker {
             }
         }
 
-        // Check if we're editing or creating new
-        if (this.editingEntryId) {
-            // Update existing entry
-            entry.id = this.editingEntryId;
-            entry.timestamp = this.getTimestampFromLocal(entry.datetime);
-            await this.updateEntry(entry);
-            this.entries = await this.loadEntries();
-            this.updateQuickStats();
-            this.displayRecentEntries();
-            // Update history if it's open
-            if (!document.getElementById('historyModal').classList.contains('hidden')) {
-                const activeFilter = document.querySelector('.filter-btn.active').dataset.filter;
-                this.filterHistory(activeFilter);
-            }
-            this.editingEntryId = null; // Clear editing flag
-        } else {
-            // Create new entry
-            await this.addEntry(entry);
-        }
+        await this.saveOrUpdateEntry(entry);
 
         this.hideForm('diaperForm');
         e.target.reset();
@@ -837,6 +769,35 @@ class BabyTracker {
                 recommendation = 'Start with: Either breast';
             }
             recommendationEl.textContent = recommendation;
+        }
+    }
+
+    refreshUI() {
+        this.updateQuickStats();
+        this.updateBreastStats();
+        this.displayRecentEntries();
+    }
+
+    async saveOrUpdateEntry(entry) {
+        if (this.editingEntryId) {
+            // Update existing entry
+            entry.id = this.editingEntryId;
+            entry.timestamp = this.getTimestampFromLocal(entry.datetime);
+            await this.updateEntry(entry);
+            this.entries = await this.loadEntries();
+            this.refreshUI();
+            this.updateHistoryIfOpen();
+            this.editingEntryId = null; // Clear editing flag
+        } else {
+            // Create new entry
+            await this.addEntry(entry);
+        }
+    }
+
+    updateHistoryIfOpen() {
+        if (!document.getElementById('historyModal').classList.contains('hidden')) {
+            const activeFilter = document.querySelector('.filter-btn.active').dataset.filter;
+            this.filterHistory(activeFilter);
         }
     }
 
@@ -1274,18 +1235,13 @@ class BabyTracker {
             // Delete from database and reload entries
             await this.deleteEntryFromDB(entryId);
             this.entries = await this.loadEntries();
-            this.updateQuickStats();
-            this.updateBreastStats();
-            this.displayRecentEntries();
+            this.refreshUI();
             
             // Hide detail modal
             document.getElementById('entryDetailModal').classList.add('hidden');
             
-            // If we're in history view, update it
-            if (!document.getElementById('historyModal').classList.contains('hidden')) {
-                const activeFilter = document.querySelector('.filter-btn.active').dataset.filter;
-                this.filterHistory(activeFilter);
-            }
+            // Update history if it's open
+            this.updateHistoryIfOpen();
         }
     }
 

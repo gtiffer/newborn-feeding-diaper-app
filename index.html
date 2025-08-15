@@ -15,9 +15,7 @@
     <script>
         // Register service worker
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./sw.js').catch(err => {
-                console.log('Service worker registration failed:', err);
-            });
+            navigator.serviceWorker.register('./sw.js');
         }
     </script>
     <div id="app">
